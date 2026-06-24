@@ -55,7 +55,7 @@ apt-get update && apt-get install -y curl wget git
 | `deploy.sh` | New API + CLIProxyAPI + CPAMC（完整两套系统） | 全新服务器，需要同时部署 AI 网关和 CLI 代理 |
 | `deploy-newapi.sh` | 仅 New API（Docker 版） | 只需要 AI API 网关 |
 | `deploy-cpa.sh` | CLIProxyAPI + CPAMC（CLI 代理完整栈） | 只需要 CLI API 代理和管理面板 |
-| `deploy-no-docker.sh` | New API + CPA 管理端（源码编译） | 无法使用 Docker 或需要定制修改 |
+| `deploy-no-docker.sh` | New API 源码编译 + CPA 前端（无 Docker） | 无法使用 Docker 或需要定制修改（no-docker 分支） |
 
 ### 一键部署（完整两套系统）
 
@@ -97,7 +97,7 @@ bash <(curl -s https://raw.githubusercontent.com/cha3343954211/Jianzhan/no-docke
 
 ### 部署流程
 
-**完整部署（deploy.sh）** 执行步骤：
+**完整部署（deploy.sh）** 执行流程：
 
 1. **系统检测**：验证操作系统和 root 权限
 2. **域名配置**：输入 New API 和 CPA 的访问域名（可选）
@@ -108,7 +108,7 @@ bash <(curl -s https://raw.githubusercontent.com/cha3343954211/Jianzhan/no-docke
 7. **部署 CLIProxyAPI 后端**：生成配置，拉取镜像并启动容器
 8. **部署 CPAMC 前端**：克隆源码，构建静态文件
 9. **配置 Nginx**：配置两个站点的反向代理和静态文件服务
-10. **配置防火墙**：放行必要端口
+10. **配置防火墙**：放行必要端口（UFW）
 11. **SSL 证书**：可选配置 HTTPS 证书
 12. **部署完成**：显示访问地址和维护指南
 
@@ -165,10 +165,19 @@ docker logs -f new-api
 # 重启服务
 docker restart new-api
 
-# 更新到最新版本
+**更新到最新版本：**
+
+```bash
 docker pull calciumion/new-api:latest
-docker restart new-api
+docker stop new-api && docker rm new-api
+docker run --name new-api -d --restart always \
+    -p 3000:3000 \
+    -e TZ=Asia/Shanghai \
+    -v /aiproxy/new-api/data:/data \
+    calciumion/new-api:latest
 ```
+
+> **注意**：如果配置了域名并通过 Nginx 反代，端口应绑定为 `127.0.0.1:3000:3000`
 
 ### CLIProxyAPI 后端维护
 
@@ -332,13 +341,23 @@ npm install -g bun
 
 ## 项目结构
 
+**main 分支（Docker 版，推荐）：**
+
 ```
 .
 ├── README.md               # 项目说明文档
 ├── deploy.sh               # 完整部署脚本（New API + CPA 完整栈）
 ├── deploy-newapi.sh        # 单独部署 New API
-├── deploy-cpa.sh           # 单独部署 CPA 完整栈（CLIProxyAPI + CPAMC）
-└── deploy-no-docker.sh     # 无 Docker 版部署脚本（no-docker 分支）
+└── deploy-cpa.sh           # 单独部署 CPA 完整栈（CLIProxyAPI + CPAMC）
+```
+
+**no-docker 分支（源码编译版）：**
+
+```
+.
+├── README.md               # 项目说明文档
+├── deploy-no-docker.sh     # 无 Docker 版部署脚本
+└── ...
 ```
 
 ## 技术栈
