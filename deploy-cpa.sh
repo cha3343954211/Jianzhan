@@ -144,7 +144,7 @@ deploy_cli_proxy_ui() {
         git pull > /dev/null 2>&1
     else
         echo -e "${YELLOW}克隆 CLI Proxy UI 仓库...${NC}"
-        git clone https://github.com/router-for-me/Cli-Proxy-API-Management-Center.git "$CLI_PROXY_UI_DIR" > /dev/null 2>&1
+        git clone https://github.com/router-for-me/CLIProxyAPI.git "$CLI_PROXY_UI_DIR" > /dev/null 2>&1
         cd "$CLI_PROXY_UI_DIR"
     fi
 

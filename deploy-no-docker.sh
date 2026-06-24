@@ -10,9 +10,12 @@ NC='\033[0m'
 
 INSTALL_DIR="/aiproxy"
 NEW_API_DIR="$INSTALL_DIR/new-api"
+NEW_API_DATA_DIR="$NEW_API_DIR/data"
+NEW_API_LOG_DIR="$NEW_API_DIR/logs"
 CLI_PROXY_UI_DIR="$INSTALL_DIR/cli-proxy-ui"
 NEW_API_PORT=3000
 CLI_PROXY_UI_PORT=5173
+GO_VERSION="1.22.10"
 
 SCRIPT_VERSION="1.0.0"
 
@@ -25,7 +28,7 @@ logo() {
     echo "  _| |_   | |      | | \ \ | |____  | |  | |  / /_   / . \  "
     echo " |_____|  |_|      |_|  \_\ \_____| |_|  |_| |____| /_/ \_\ "
     echo ""
-    echo -e "   AI Proxy 一键部署脚本 v${SCRIPT_VERSION}"
+    echo -e "   AI Proxy 一键部署脚本 v${SCRIPT_VERSION}（无 Docker 版）${NC}"
     echo -e "${NC}"
 }
 
@@ -60,7 +63,7 @@ check_os() {
 install_dependencies() {
     echo ""
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}  步骤 1/6: 安装系统依赖${NC}"
+    echo -e "${BLUE}  步骤 1/7: 安装系统依赖${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
 
@@ -68,33 +71,53 @@ install_dependencies() {
     apt-get update -qq
 
     echo -e "${YELLOW}安装基础工具...${NC}"
-    apt-get install -y -qq curl wget git vim nginx certbot python3-certbot-nginx ufw > /dev/null 2>&1
+    apt-get install -y -qq curl wget git vim nginx certbot python3-certbot-nginx ufw build-essential > /dev/null 2>&1
 
     echo -e "${GREEN}系统依赖安装完成${NC}"
 }
 
-install_docker() {
+install_go() {
     echo ""
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}  步骤 2/6: 安装 Docker${NC}"
+    echo -e "${BLUE}  步骤 2/7: 安装 Go 运行时${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
 
-    if command -v docker &> /dev/null; then
-        echo -e "${GREEN}Docker 已安装: $(docker --version)${NC}"
+    if command -v go &> /dev/null; then
+        local current_ver
+        current_ver=$(go version | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+        echo -e "${GREEN}Go 已安装: $(go version)${NC}"
     else
-        echo -e "${YELLOW}正在安装 Docker...${NC}"
-        curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
-        systemctl start docker
-        systemctl enable docker
-        echo -e "${GREEN}Docker 安装完成: $(docker --version)${NC}"
+        echo -e "${YELLOW}正在安装 Go ${GO_VERSION}...${NC}"
+        local arch
+        arch=$(uname -m)
+        if [ "$arch" = "x86_64" ]; then
+            GO_ARCH="amd64"
+        elif [ "$arch" = "aarch64" ]; then
+            GO_ARCH="arm64"
+        else
+            echo -e "${RED}不支持的架构: $arch${NC}"
+            exit 1
+        fi
+
+        wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz
+        rm -rf /usr/local/go
+        tar -C /usr/local -xzf /tmp/go.tar.gz
+        rm -f /tmp/go.tar.gz
+
+        if ! grep -q '/usr/local/go/bin' ~/.bashrc 2>/dev/null; then
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+        fi
+        export PATH=$PATH:/usr/local/go/bin
+
+        echo -e "${GREEN}Go 安装完成: $(go version)${NC}"
     fi
 }
 
 install_bun() {
     echo ""
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}  步骤 3/6: 安装 Bun 运行时${NC}"
+    echo -e "${BLUE}  步骤 3/7: 安装 Bun 运行时${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
 
@@ -147,52 +170,88 @@ prompt_domains() {
 create_directories() {
     echo ""
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}  步骤 4/6: 部署项目${NC}"
+    echo -e "${BLUE}  步骤 4/7: 部署项目${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
 
     mkdir -p "$INSTALL_DIR"
+    mkdir -p "$NEW_API_DATA_DIR"
+    mkdir -p "$NEW_API_LOG_DIR"
     echo -e "${GREEN}创建安装目录: $INSTALL_DIR${NC}"
 }
 
 deploy_new_api() {
     echo ""
-    echo -e "${YELLOW}正在部署 New API...${NC}"
+    echo -e "${YELLOW}正在部署 New API（源码编译）...${NC}"
+
+    export PATH=$PATH:/usr/local/go/bin
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
 
     if [ -d "$NEW_API_DIR" ]; then
-        echo -e "${YELLOW}New API 目录已存在，跳过克隆${NC}"
+        echo -e "${YELLOW}New API 目录已存在，更新源码...${NC}"
+        cd "$NEW_API_DIR"
+        git pull > /dev/null 2>&1
     else
         echo -e "${YELLOW}克隆 New API 仓库...${NC}"
         git clone https://github.com/QuantumNous/new-api.git "$NEW_API_DIR" > /dev/null 2>&1
+        cd "$NEW_API_DIR"
     fi
 
+    echo -e "${YELLOW}构建前端（default）...${NC}"
+    cd "$NEW_API_DIR/web"
+    bun install --frozen-lockfile > /dev/null 2>&1
+    cd "$NEW_API_DIR/web/default"
+    DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat "$NEW_API_DIR/VERSION") bun run build > /dev/null 2>&1
+    echo -e "${GREEN}前端 default 构建完成${NC}"
+
+    echo -e "${YELLOW}构建前端（classic）...${NC}"
+    cd "$NEW_API_DIR/web/classic"
+    VITE_REACT_APP_VERSION=$(cat "$NEW_API_DIR/VERSION") bun run build > /dev/null 2>&1
+    echo -e "${GREEN}前端 classic 构建完成${NC}"
+
+    echo -e "${YELLOW}编译 Go 后端...${NC}"
     cd "$NEW_API_DIR"
+    go mod download > /dev/null 2>&1
+    CGO_ENABLED=0 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api > /dev/null 2>&1
 
-    NEW_API_DATA_DIR="$NEW_API_DIR/data"
-    mkdir -p "$NEW_API_DATA_DIR"
-
-    echo -e "${YELLOW}拉取最新 Docker 镜像...${NC}"
-    docker pull calciumion/new-api:latest > /dev/null 2>&1
-
-    if docker ps -a --format '{{.Names}}' | grep -q '^new-api$'; then
-        echo -e "${YELLOW}已存在 new-api 容器，正在更新...${NC}"
-        docker stop new-api > /dev/null 2>&1
-        docker rm new-api > /dev/null 2>&1
+    if [ -f "$NEW_API_DIR/new-api" ]; then
+        echo -e "${GREEN}New API 编译完成${NC}"
+    else
+        echo -e "${RED}New API 编译失败${NC}"
+        exit 1
     fi
 
-    echo -e "${YELLOW}启动 New API 容器...${NC}"
-    docker run --name new-api -d --restart always \
-        -p "$NEW_API_PORT:3000" \
-        -e TZ=Asia/Shanghai \
-        -v "$NEW_API_DATA_DIR:/data" \
-        calciumion/new-api:latest > /dev/null 2>&1
+    echo -e "${YELLOW}配置 systemd 服务...${NC}"
+
+    cat > /etc/systemd/system/new-api.service << EOF
+[Unit]
+Description=New API Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$NEW_API_DATA_DIR
+ExecStart=$NEW_API_DIR/new-api --port $NEW_API_PORT --log-dir $NEW_API_LOG_DIR
+Restart=always
+RestartSec=5
+Environment=TZ=Asia/Shanghai
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable new-api > /dev/null 2>&1
+    systemctl start new-api
 
     sleep 3
 
-    if docker ps --format '{{.Names}}' | grep -q '^new-api$'; then
+    if systemctl is-active --quiet new-api; then
         echo -e "${GREEN}New API 部署成功，运行在端口 $NEW_API_PORT${NC}"
     else
-        echo -e "${RED}New API 启动失败，请检查日志: docker logs new-api${NC}"
+        echo -e "${RED}New API 启动失败，请检查日志: journalctl -u new-api -n 50${NC}"
         exit 1
     fi
 }
@@ -201,14 +260,18 @@ deploy_cli_proxy_ui() {
     echo ""
     echo -e "${YELLOW}正在部署 CLI Proxy API Management Center...${NC}"
 
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+
     if [ -d "$CLI_PROXY_UI_DIR" ]; then
-        echo -e "${YELLOW}CLI Proxy UI 目录已存在，跳过克隆${NC}"
+        echo -e "${YELLOW}CLI Proxy UI 目录已存在，更新源码...${NC}"
+        cd "$CLI_PROXY_UI_DIR"
+        git pull > /dev/null 2>&1
     else
         echo -e "${YELLOW}克隆 CLI Proxy UI 仓库...${NC}"
         git clone https://github.com/router-for-me/CLIProxyAPI.git "$CLI_PROXY_UI_DIR" > /dev/null 2>&1
+        cd "$CLI_PROXY_UI_DIR"
     fi
-
-    cd "$CLI_PROXY_UI_DIR"
 
     echo -e "${YELLOW}安装依赖...${NC}"
     bun install --frozen-lockfile > /dev/null 2>&1
@@ -233,7 +296,7 @@ deploy_cli_proxy_ui() {
 configure_nginx() {
     echo ""
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}  步骤 5/6: 配置 Nginx${NC}"
+    echo -e "${BLUE}  步骤 5/7: 配置 Nginx${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
 
@@ -317,6 +380,11 @@ EOF
 
 setup_firewall() {
     echo ""
+    echo -e "${BLUE}============================================${NC}"
+    echo -e "${BLUE}  步骤 6/7: 配置防火墙${NC}"
+    echo -e "${BLUE}============================================${NC}"
+    echo ""
+
     echo -e "${YELLOW}配置防火墙...${NC}"
 
     ufw --force reset > /dev/null 2>&1 || true
@@ -333,6 +401,11 @@ setup_firewall() {
 
 setup_ssl() {
     echo ""
+    echo -e "${BLUE}============================================${NC}"
+    echo -e "${BLUE}  步骤 7/7: SSL 证书配置${NC}"
+    echo -e "${BLUE}============================================${NC}"
+    echo ""
+
     read -p "是否配置 SSL 证书（需要域名已解析）？(y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -390,6 +463,8 @@ show_summary() {
     echo -e "${BLUE}【安装目录】${NC}"
     echo -e "  主目录:            $INSTALL_DIR"
     echo -e "  New API:           $NEW_API_DIR"
+    echo -e "  New API 数据:      $NEW_API_DATA_DIR"
+    echo -e "  New API 日志:      $NEW_API_LOG_DIR"
     echo -e "  CLI Proxy UI 源码: $CLI_PROXY_UI_DIR"
     echo -e "  CLI Proxy UI 静态: $CLI_PROXY_SERVE_DIR"
     echo ""
@@ -407,17 +482,21 @@ show_maintenance() {
     echo -e "${BLUE}============================================${NC}"
     echo ""
     echo -e "${YELLOW}【New API 维护】${NC}"
-    echo -e "  查看状态:    ${GREEN}docker ps | grep new-api${NC}"
-    echo -e "  查看日志:    ${GREEN}docker logs -f new-api${NC}"
-    echo -e "  重启服务:    ${GREEN}docker restart new-api${NC}"
-    echo -e "  停止服务:    ${GREEN}docker stop new-api${NC}"
-    echo -e "  启动服务:    ${GREEN}docker start new-api${NC}"
+    echo -e "  查看状态:    ${GREEN}systemctl status new-api${NC}"
+    echo -e "  查看日志:    ${GREEN}journalctl -u new-api -f${NC}"
+    echo -e "  重启服务:    ${GREEN}systemctl restart new-api${NC}"
+    echo -e "  停止服务:    ${GREEN}systemctl stop new-api${NC}"
+    echo -e "  启动服务:    ${GREEN}systemctl start new-api${NC}"
     echo ""
     echo -e "  更新到最新版本:"
     echo -e "    ${GREEN}cd $NEW_API_DIR${NC}"
-    echo -e "    ${GREEN}docker pull calciumion/new-api:latest${NC}"
-    echo -e "    ${GREEN}docker stop new-api \&\& docker rm new-api${NC}"
-    echo -e "    ${GREEN}docker run --name new-api -d --restart always -p $NEW_API_PORT:3000 -e TZ=Asia/Shanghai -v $NEW_API_DIR/data:/data calciumion/new-api:latest${NC}"
+    echo -e "    ${GREEN}git pull${NC}"
+    echo -e "    ${GREEN}cd web && bun install --frozen-lockfile${NC}"
+    echo -e "    ${GREEN}cd default && DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=\$(cat $NEW_API_DIR/VERSION) bun run build${NC}"
+    echo -e "    ${GREEN}cd ../classic && VITE_REACT_APP_VERSION=\$(cat $NEW_API_DIR/VERSION) bun run build${NC}"
+    echo -e "    ${GREEN}cd $NEW_API_DIR${NC}"
+    echo -e "    ${GREEN}CGO_ENABLED=0 go build -ldflags \"-s -w -X 'github.com/QuantumNous/new-api/common.Version=\$(cat VERSION)'\" -o new-api${NC}"
+    echo -e "    ${GREEN}systemctl restart new-api${NC}"
     echo ""
     echo -e "${YELLOW}【CLI Proxy UI 维护】${NC}"
     echo -e "  更新到最新版本:"
@@ -438,8 +517,8 @@ show_maintenance() {
     echo -e "  测试续期:    ${GREEN}certbot renew --dry-run${NC}"
     echo ""
     echo -e "${YELLOW}【数据备份】${NC}"
-    echo -e "  New API 数据: $NEW_API_DIR/data/ 目录"
-    echo -e "  备份命令:    ${GREEN}cp -r $NEW_API_DIR/data /path/to/backup/\$(date +%Y%m%d)${NC}"
+    echo -e "  New API 数据: $NEW_API_DATA_DIR 目录"
+    echo -e "  备份命令:    ${GREEN}cp -r $NEW_API_DATA_DIR /path/to/backup/\$(date +%Y%m%d)${NC}"
     echo ""
     echo -e "${GREEN}============================================${NC}"
     echo -e "${GREEN}  部署完成！感谢使用 AI Proxy 一键部署脚本${NC}"
@@ -454,9 +533,11 @@ main() {
     check_os
 
     echo ""
-    echo -e "${YELLOW}即将在服务器上部署以下项目：${NC}"
-    echo -e "  1. New API (AI API 网关)"
+    echo -e "${YELLOW}即将在服务器上部署以下项目（无 Docker 版本）：${NC}"
+    echo -e "  1. New API (AI API 网关，源码编译部署)"
     echo -e "  2. CLI Proxy API Management Center (管理前端)"
+    echo ""
+    echo -e "${YELLOW}注意：此版本通过源码编译方式部署 New API，需要安装 Go 和 Bun，编译耗时较长。${NC}"
     echo ""
     read -p "是否继续部署？(y/n): " -n 1 -r
     echo
@@ -467,7 +548,7 @@ main() {
 
     prompt_domains
     install_dependencies
-    install_docker
+    install_go
     install_bun
     create_directories
     deploy_new_api
