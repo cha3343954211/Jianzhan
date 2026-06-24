@@ -132,17 +132,9 @@ deploy_new_api() {
     echo ""
     echo -e "${YELLOW}正在部署 New API...${NC}"
 
-    if [ -d "$NEW_API_DIR" ]; then
-        echo -e "${YELLOW}New API 目录已存在，跳过克隆${NC}"
-    else
-        echo -e "${YELLOW}克隆 New API 仓库...${NC}"
-        git clone https://github.com/QuantumNous/new-api.git "$NEW_API_DIR" > /dev/null 2>&1
-    fi
-
-    cd "$NEW_API_DIR"
-
     NEW_API_DATA_DIR="$NEW_API_DIR/data"
     mkdir -p "$NEW_API_DATA_DIR"
+    echo -e "${GREEN}创建数据目录: $NEW_API_DATA_DIR${NC}"
 
     echo -e "${YELLOW}拉取最新 Docker 镜像...${NC}"
     docker pull calciumion/new-api:latest > /dev/null 2>&1
@@ -256,19 +248,20 @@ setup_ssl() {
     echo -e "${BLUE}============================================${NC}"
     echo ""
 
-    read -p "是否配置 SSL 证书（需要域名已解析）？(y/n): " -n 1 -r
+    if [ -z "$NEW_API_DOMAIN" ]; then
+        echo -e "${YELLOW}未配置域名，跳过 SSL 证书配置${NC}"
+        return
+    fi
+
+    read -p "是否配置 SSL 证书（需要域名已解析到本服务器）？(y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         return
     fi
 
-    echo -e "${YELLOW}配置 SSL 证书...${NC}"
-
-    if [ -n "$NEW_API_DOMAIN" ]; then
-        echo -e "${YELLOW}为 $NEW_API_DOMAIN 申请证书...${NC}"
-        certbot --nginx -d "$NEW_API_DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect 2>/dev/null || \
-            echo -e "${YELLOW}SSL 证书申请失败，请稍后手动配置${NC}"
-    fi
+    echo -e "${YELLOW}为 $NEW_API_DOMAIN 申请证书...${NC}"
+    certbot --nginx -d "$NEW_API_DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect 2>/dev/null || \
+        echo -e "${YELLOW}SSL 证书申请失败，请稍后手动配置${NC}"
 
     echo -e "${GREEN}SSL 证书配置完成${NC}"
 }

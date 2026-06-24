@@ -337,19 +337,26 @@ deploy_cpa_frontend() {
 
     if [ -d "$CPAMC_DIR" ]; then
         echo -e "${YELLOW}CPAMC 目录已存在，更新源码...${NC}"
-        cd "$CPAMC_DIR"
-        git pull > /dev/null 2>&1
+        (
+            cd "$CPAMC_DIR"
+            git pull > /dev/null 2>&1
+        )
     else
         echo -e "${YELLOW}克隆 CPAMC 仓库...${NC}"
         git clone https://github.com/router-for-me/Cli-Proxy-API-Management-Center.git "$CPAMC_DIR" > /dev/null 2>&1
-        cd "$CPAMC_DIR"
     fi
 
     echo -e "${YELLOW}安装依赖...${NC}"
-    bun install --frozen-lockfile > /dev/null 2>&1
+    (
+        cd "$CPAMC_DIR"
+        bun install --frozen-lockfile > /dev/null 2>&1
+    )
 
     echo -e "${YELLOW}构建前端...${NC}"
-    bun run build > /dev/null 2>&1
+    (
+        cd "$CPAMC_DIR"
+        bun run build > /dev/null 2>&1
+    )
 
     if [ -f "$CPAMC_DIR/dist/index.html" ]; then
         echo -e "${GREEN}CPAMC 前端构建成功${NC}"
