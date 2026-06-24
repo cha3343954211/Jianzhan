@@ -154,8 +154,15 @@ deploy_new_api() {
     fi
 
     echo -e "${YELLOW}启动 New API 容器...${NC}"
+
+    if [ -n "$NEW_API_DOMAIN" ]; then
+        BIND_ADDR="127.0.0.1"
+    else
+        BIND_ADDR="0.0.0.0"
+    fi
+
     docker run --name new-api -d --restart always \
-        -p "$NEW_API_PORT:3000" \
+        -p "$BIND_ADDR:$NEW_API_PORT:3000" \
         -e TZ=Asia/Shanghai \
         -v "$NEW_API_DATA_DIR:/data" \
         calciumion/new-api:latest > /dev/null 2>&1
