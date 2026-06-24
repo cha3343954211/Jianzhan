@@ -48,9 +48,19 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
+### 无 Docker 版本
+
+如果服务器不方便使用 Docker，也可以使用源码编译版本：
+
+```bash
+bash <(curl -s https://raw.githubusercontent.com/cha3343954211/Jianzhan/main/deploy-no-docker.sh)
+```
+
+> **注意**：无 Docker 版本需要从源码编译 New API（Go 后端 + 前端），首次部署耗时较长（约 5-15 分钟），且需要安装 Go 和 Bun 运行时。适合有定制化需求或无法使用 Docker 的场景。
+
 ### 部署流程
 
-脚本执行过程中会依次完成以下步骤：
+**Docker 版（推荐）** 执行步骤：
 
 1. **系统检测**：验证操作系统和 root 权限
 2. **域名配置**：输入两个项目的访问域名（可选，也可使用 IP:端口）
@@ -64,6 +74,32 @@ chmod +x deploy.sh
 8. **配置防火墙**：放行必要端口
 9. **SSL 证书**：可选配置 HTTPS 证书
 10. **部署完成**：显示访问地址和维护指南
+
+**无 Docker 版** 执行步骤：
+
+1. **系统检测**：验证操作系统和 root 权限
+2. **域名配置**：输入两个项目的访问域名
+3. **安装系统依赖**：安装基础工具和编译依赖
+4. **安装 Go**：安装 Go 语言运行时
+5. **安装 Bun**：安装 Bun JavaScript 运行时
+6. **部署项目**：
+   - 克隆 New API 源码，构建前端（default + classic），编译 Go 二进制，配置 systemd 服务
+   - 克隆并构建 CLI Proxy UI（静态文件）
+7. **配置 Nginx**：配置反向代理和静态文件服务
+8. **配置防火墙**：放行必要端口
+9. **SSL 证书**：可选配置 HTTPS 证书
+10. **部署完成**：显示访问地址和维护指南
+
+### 两种部署方式对比
+
+| 对比项 | Docker 版（推荐） | 无 Docker 版 |
+|--------|-------------------|--------------|
+| 部署速度 | 快（2-5 分钟） | 慢（5-15 分钟） |
+| 资源占用 | 较高（Docker 开销） | 较低 |
+| 更新方式 | 拉取新镜像重启容器 | 重新拉取源码编译 |
+| 系统要求 | 需要 Docker | 需要 Go + Bun |
+| 维护难度 | 简单 | 稍复杂 |
+| 自定义难度 | 中等 | 高（可直接改源码） |
 
 ## 部署完成后
 
@@ -100,6 +136,8 @@ New API 初始管理员账号：
 
 ### New API 维护
 
+**Docker 版本：**
+
 ```bash
 # 查看运行状态
 docker ps | grep new-api
@@ -128,6 +166,44 @@ docker run --name new-api -d --restart always \
     -e TZ=Asia/Shanghai \
     -v /aiproxy/new-api/data:/data \
     calciumion/new-api:latest
+```
+
+**无 Docker 版本（systemd）：**
+
+```bash
+# 查看运行状态
+systemctl status new-api
+
+# 查看实时日志
+journalctl -u new-api -f
+
+# 重启服务
+systemctl restart new-api
+
+# 停止服务
+systemctl stop new-api
+
+# 启动服务
+systemctl start new-api
+```
+
+**更新到最新版本（无 Docker 版）：**
+
+```bash
+cd /aiproxy/new-api
+git pull
+
+# 构建前端
+cd web && bun install --frozen-lockfile
+cd default && DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat /aiproxy/new-api/VERSION) bun run build
+cd ../classic && VITE_REACT_APP_VERSION=$(cat /aiproxy/new-api/VERSION) bun run build
+
+# 编译后端
+cd /aiproxy/new-api
+CGO_ENABLED=0 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
+
+# 重启服务
+systemctl restart new-api
 ```
 
 ### CLI Proxy UI 维护
@@ -243,8 +319,9 @@ npm install -g bun
 
 ```
 .
-├── README.md         # 项目说明文档
-└── deploy.sh         # 一键部署脚本
+├── README.md               # 项目说明文档
+├── deploy.sh               # Docker 版一键部署脚本（推荐）
+└── deploy-no-docker.sh     # 无 Docker 版一键部署脚本（源码编译）
 ```
 
 ## 技术栈
